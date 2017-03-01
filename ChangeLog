@@ -1,9 +1,17 @@
 estd ChangeLog
 ==============
 
+estd-r9
+* Improve SMP support on NetBSD.
+  Submitted by: vincent@labri.fr
+
+estd-r8
+* Add Intrepid support.
+  Submitted by: Michael <macallan@netbsd.org>
+
 estd-r7
 * Add support for ACPI P-States on DragonFly.
-* Improve multi-core support on DragpnFly. For each CPU domain with individually
+* Improve multi-core support on DragonFly. For each CPU domain with individually
   controllable CPU frequency, the load of the most loaded CPU is used instead of
   the overall avarage load.
   This avoids issues on SMP systems where a single-threaded CPU bound process

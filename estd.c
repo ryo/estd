@@ -43,7 +43,7 @@
 #include <errno.h>
 #include <signal.h>
 
-#define ESTD_VERSION "Release 7"
+#define ESTD_VERSION "Release 8"
 #define BATTERY 0
 #define SMOOTH 1
 #define AGGRESSIVE 2
@@ -55,11 +55,13 @@
 #define TECH_EST 1
 #define TECH_POWERNOW 2
 #define TECH_ACPI 3
-#define TECH_MAX 3
+#define TECH_INTREPID 4
+#define TECH_MAX 4
 
 /* this is ugly, but... <shrug> */
 #define MAX_FREQS 32
 #define SYSCTLBUF 255
+#define MAX_CPUS  128
 
 extern char    *optarg;
 extern int      optind;
@@ -110,32 +112,35 @@ int             ndomains;
  size_t cp_time_len;
 #else
  static int cpumib[2] = {CTL_KERN, KERN_CP_TIME};
- static u_int64_t cp_time[CPUSTATES];
- static u_int64_t cp_old[CPUSTATES];
- static u_int64_t cp_diff[CPUSTATES];
- static size_t cp_time_size = sizeof(cp_time[0]) * CPUSTATES;
+ static u_int64_t cp_time[MAX_CPUS][CPUSTATES];
+ static u_int64_t cp_old[MAX_CPUS][CPUSTATES];
+ static u_int64_t cp_diff[MAX_CPUS][CPUSTATES];
+ static const size_t cp_time_max_size = sizeof(cp_time[0]) * MAX_CPUS;
 #endif
 
-static char	*techdesc[4] = {"Unknown",
+static char	*techdesc[5] = {"Unknown",
 				"Enhanced SpeedStep",
 				"PowerNow",
-				"ACPI P-States"
+				"ACPI P-States",
+				"Intrepid"
 				};
-static char	*freqctl[4] = {	"",	
+static char	*freqctl[5] = {	"",	
 				"machdep.est.frequency.available",
 				"machdep.powernow.frequency.available",
-				"hw.acpi.cpu.px_dom0.available"
+				"hw.acpi.cpu.px_dom0.available",
+				"machdep.intrepid.frequency.available"
 				};
-static char	*setctl[4] = {	"",
+static char	*setctl[5] = {	"",
 				"machdep.est.frequency.target",
 				"machdep.powernow.frequency.target",
-				"hw.acpi.cpu.px_dom0.select"
+				"hw.acpi.cpu.px_dom0.select",
+				"machdep.intrepid.frequency.target"
 				};
 
 void
 usage()
 {
-	printf("usage: estd [-d] [-o] [-n] [-A] [-C] [-E] [-P] [-a] [-s] [-b] [-p poll interval in us] [-g grace period] [-l low watermark percentage] [-h high watermark percentage] [-m minimum MHz] [-M maximum MHz]\n");
+	printf("usage: estd [-d] [-o] [-n] [-A] [-C] [-E] [-I] [-P] [-a] [-s] [-b] [-p poll interval in us] [-g grace period] [-l low watermark percentage] [-h high watermark percentage] [-m minimum MHz] [-M maximum MHz]\n");
 	printf("       estd -v\n");
 	printf("       estd -f\n");
 	exit(1);
@@ -267,30 +272,53 @@ get_cpuusage(int d)
 	return max_load;
 }
 #else
+
 int
-get_cputime()
+get_cputime(void)
 {
+	size_t cp_time_size = cp_time_max_size;
+
+	memcpy(cp_old, cp_time, cp_time_max_size);
+	if (sysctl(cpumib, 2, &cp_time, &cp_time_size, NULL, 0) < 0) {
+		fprintf(stderr, "estd: Cannot get CPU status\n");
+		exit(1);
+	}
+
+	ncpus = cp_time_size / sizeof cp_time[0];
+
+	return 0;
 }
 
 int
 get_cpuusage(int d)
 {
+	u_int64_t	max_total_time = 0;
+	int		cpu_of_max = 0;
+	int		cpu;
 	int             i;
-	u_int64_t       total_time = 0;
-	memcpy(&cp_old[0], &cp_time[0], cp_time_size);
-	if (sysctl(cpumib, 2, &cp_time, &cp_time_size, NULL, 0) < 0) {
-		fprintf(stderr, "estd: Cannot get CPU status\n");
-		exit(1);
+
+	for (cpu = 0; cpu < ncpus; cpu++) {
+		u_int64_t total_time = 0;
+
+		for (i = 0; i < CPUSTATES; i++) {
+			cp_diff[cpu][i] = cp_time[cpu][i] - cp_old[cpu][i];
+			if (i != CP_IDLE)
+				total_time += cp_diff[cpu][i];
+		}
+		if (total_time > max_total_time) {
+			max_total_time = total_time;
+			cpu_of_max = cpu;
+		}
 	}
-	for (i = 0; i < CPUSTATES; i++) {
-		cp_diff[i] = cp_time[i] - cp_old[i];
-		total_time += cp_diff[i];
-	}
+
+	max_total_time += cp_diff[cpu_of_max][CP_IDLE];
 
 	/* we've probably been interrupted by a signal... */
-	if (total_time < 1) return -1; 
+	if (max_total_time < 1) return -1; 
 
-	return (100 - ((cp_diff[CP_IDLE] + (cp_diff[CP_NICE] * nicemod)) * 100) / total_time);
+	return (100 - ((cp_diff[cpu_of_max][CP_IDLE] +
+			(cp_diff[cpu_of_max][CP_NICE] * nicemod)) * 100) /
+				max_total_time);
 }
 #endif
 
@@ -367,7 +395,7 @@ main(int argc, char *argv[])
 	FILE           *fexists;
 
 	/* get command-line options */
-	while ((ch = getopt(argc, argv, "vfdonACEPasbp:h:l:g:m:M:")) != -1)
+	while ((ch = getopt(argc, argv, "vfdonACEIPasbp:h:l:g:m:M:")) != -1)
 		switch (ch) {
 		case 'v':
 			version();
@@ -398,8 +426,12 @@ main(int argc, char *argv[])
 		case 'E':
 			tech = TECH_EST;
 			break;
+		case 'I':
+			tech = TECH_INTREPID;
+			break;
 		case 'P':
 			tech = TECH_POWERNOW;
+			break;
 		case 'a':
 			strategy = AGGRESSIVE;
 			break;
@@ -587,14 +619,6 @@ main(int argc, char *argv[])
 		set_freq(d);
 	}
 	set_clockmod(clockmod_min);
-
-	#if !defined(__DragonFly__)
-	 for (i = 0; i < CPUSTATES; i++) {
-	 	cp_time[i] = 0;
-	 	cp_old[i] = 0;
-		cp_diff[i] = 0;
-	 }
-	#endif
 
 	/* the big processing loop, we will only exit via signal */
 	while (1) {

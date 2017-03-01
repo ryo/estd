@@ -1,9 +1,9 @@
-.TH estd 1 "October 20, 2009" "release 7" "USER COMMANDS"
+.TH estd 1 "October 20, 2009" "release 8" "USER COMMANDS"
 .SH NAME
 estd \- Enhanced SpeedStep & PowerNow management daemon
 .SH SYNOPSIS
 .B estd
-[\-d] [\-o] [\-A] [\-C] [\-E] [\-P] [\-a] [\-s] [\-b] [\-p interval] [\-g period] [\-l low] [\-h high] [\-m minimum] [\-M maximum]
+[\-d] [\-o] [\-A] [\-C] [\-E] [\-I] [\-P] [\-a] [\-s] [\-b] [\-p interval] [\-g period] [\-l low] [\-h high] [\-m minimum] [\-M maximum]
 .PP
 .B estd
 -f
@@ -53,6 +53,9 @@ is used (this feature is not available on Dragonfly BSD)
 .TP
 \-E
 Force Enhanced Speedstep-Mode.
+.TP
+\-E
+Force Intrepid-Mode.
 .TP
 \-P
 Force PowerNow Mode.
