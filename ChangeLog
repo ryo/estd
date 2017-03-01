@@ -1,6 +1,15 @@
 estd ChangeLog
 ==============
 
+estd-r11
+* Fix incorrect static array initialization introduced in r10.
+  submitted-by: Leonardo Taccari <iamleot@gmail.com>
+
+estd-r10
+* Fix build on DragonFly due to pidfile changes.
+* Add support for TECH_LOONGSON, TECH_ROCKCHIP, and TECH_GENERIC.
+  Taken from pkgsrc, submitted-by: Leonardo Taccari <iamleot@gmail.com>
+
 estd-r9
 * Improve SMP support on NetBSD.
   Submitted by: vincent@labri.fr

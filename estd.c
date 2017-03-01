@@ -43,7 +43,7 @@
 #include <errno.h>
 #include <signal.h>
 
-#define ESTD_VERSION "Release 8"
+#define ESTD_VERSION "Release 11"
 #define BATTERY 0
 #define SMOOTH 1
 #define AGGRESSIVE 2
@@ -56,8 +56,11 @@
 #define TECH_POWERNOW 2
 #define TECH_ACPI 3
 #define TECH_INTREPID 4
-#define TECH_MAX 4
-
+#define TECH_LOONGSON 5
+#define TECH_ROCKCHIP 6
+#define TECH_GENERIC 7
+#define TECH_MAX 7
+ 
 /* this is ugly, but... <shrug> */
 #define MAX_FREQS 32
 #define SYSCTLBUF 255
@@ -118,29 +121,38 @@ int             ndomains;
  static const size_t cp_time_max_size = sizeof(cp_time[0]) * MAX_CPUS;
 #endif
 
-static char	*techdesc[5] = {"Unknown",
+static char	*techdesc[TECH_MAX + 1] = {"Unknown",
 				"Enhanced SpeedStep",
 				"PowerNow",
 				"ACPI P-States",
-				"Intrepid"
+				"Intrepid",
+				"Loongson",
+				"Rockchip",
+				"Generic"
 				};
-static char	*freqctl[5] = {	"",	
+static char	*freqctl[TECH_MAX + 1] = {	"",	
 				"machdep.est.frequency.available",
 				"machdep.powernow.frequency.available",
 				"hw.acpi.cpu.px_dom0.available",
-				"machdep.intrepid.frequency.available"
+				"machdep.intrepid.frequency.available",
+				"machdep.loongson.frequency.available",
+				"machdep.cpu.frequency.available",
+				"machdep.frequency.available"
 				};
-static char	*setctl[5] = {	"",
+static char	*setctl[TECH_MAX + 1] = {	"",
 				"machdep.est.frequency.target",
 				"machdep.powernow.frequency.target",
 				"hw.acpi.cpu.px_dom0.select",
-				"machdep.intrepid.frequency.target"
+				"machdep.intrepid.frequency.target",
+				"machdep.loongson.frequency.target",
+				"machdep.cpu.frequency.target",
+				"machdep.frequency.current"
 				};
 
 void
 usage()
 {
-	printf("usage: estd [-d] [-o] [-n] [-A] [-C] [-E] [-I] [-P] [-a] [-s] [-b] [-p poll interval in us] [-g grace period] [-l low watermark percentage] [-h high watermark percentage] [-m minimum MHz] [-M maximum MHz]\n");
+	printf("usage: estd [-d] [-o] [-n] [-A] [-C] [-E] [-I] [-L] [-R] [-P] [-G] [-a] [-s] [-b] [-p poll interval in us] [-g grace period] [-l low watermark percentage] [-h high watermark percentage] [-m minimum MHz] [-M maximum MHz]\n");
 	printf("       estd -v\n");
 	printf("       estd -f\n");
 	exit(1);
@@ -393,9 +405,12 @@ main(int argc, char *argv[])
 	int	            curstrat = strategy;
 	int             d;
 	FILE           *fexists;
+#if defined(__DragonFly__)
+	struct pidfh   *pdf;
+#endif
 
 	/* get command-line options */
-	while ((ch = getopt(argc, argv, "vfdonACEIPasbp:h:l:g:m:M:")) != -1)
+	while ((ch = getopt(argc, argv, "vfdonACEGILPasbp:h:l:g:m:M:")) != -1)
 		switch (ch) {
 		case 'v':
 			version();
@@ -426,11 +441,20 @@ main(int argc, char *argv[])
 		case 'E':
 			tech = TECH_EST;
 			break;
+		case 'G':
+			tech = TECH_GENERIC;
+			break;
 		case 'I':
 			tech = TECH_INTREPID;
 			break;
+                case 'L':
+                        tech = TECH_LOONGSON;
+                        break;
 		case 'P':
 			tech = TECH_POWERNOW;
+			break;
+		case 'R':
+			tech = TECH_ROCKCHIP;
 			break;
 		case 'a':
 			strategy = AGGRESSIVE;
@@ -466,8 +490,9 @@ main(int argc, char *argv[])
 
 	ndomains = 1;
 	domain = ecalloc(ndomains, sizeof(struct domain));
-	
-	#if defined(__DragonFly__)
+
+#if defined(__NetBSD__) || defined(__DragonFly__)
+# if defined(__DragonFly__)
 	if (kinfo_get_cpus(&ncpus)) {
 		fprintf(stderr, "estd: Cannot get number of cpus\n");
 		exit(1);
@@ -475,11 +500,18 @@ main(int argc, char *argv[])
 	cp_time = ecalloc(ncpus, sizeof(struct kinfo_cputime));
 	cp_old  = ecalloc(ncpus, sizeof(struct kinfo_cputime));
 	cp_time_len = ncpus * sizeof(struct kinfo_cputime);
+# elif defined(__NetBSD__)
+	size_t ncpus_len = sizeof(ncpus);
+	if (sysctlbyname("hw.ncpu", &ncpus, &ncpus_len, NULL, 0) != 0) {
+		fprintf(stderr, "estd: Cannot get number of cpus\n");
+		exit(1);
+	}
+# endif
 	domain[0].ncpus = ncpus;
 	domain[0].cpus = ecalloc(ncpus, sizeof(int));
 	for (i = 0; i < domain[0].ncpus; i++)
 		domain[0].cpus[i] = i;
-	#endif
+#endif
 
 	/* try to guess cpu-scaling technology */
 	if (tech == TECH_UNKNOWN) {
@@ -601,10 +633,20 @@ main(int argc, char *argv[])
 		printf("estd: Not detaching from terminal\n");
 	}
 
+#if defined(__DragonFly__)
+	pdf = pidfile_open(NULL, 600, NULL);
+	if (pdf == NULL) {
+		fprintf(stderr, "estd: Cannot write pidfile (maybe you aren't root?)\n");
+		exit(1);
+	} else {
+		pidfile_write(pdf);
+	}
+#else
 	if (pidfile(NULL)) {
 		fprintf(stderr, "estd: Cannot write pidfile (maybe you aren't root?)\n");
 		exit(1);
 	}
+#endif
 	
 	/* init some vars and set inital frequency */
 	signal(SIGHUP, SIG_IGN);
