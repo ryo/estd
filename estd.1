@@ -1,0 +1,140 @@
+.TH estd 1 "October 20, 2009" "release 7" "USER COMMANDS"
+.SH NAME
+estd \- Enhanced SpeedStep & PowerNow management daemon
+.SH SYNOPSIS
+.B estd
+[\-d] [\-o] [\-A] [\-C] [\-E] [\-P] [\-a] [\-s] [\-b] [\-p interval] [\-g period] [\-l low] [\-h high] [\-m minimum] [\-M maximum]
+.PP
+.B estd
+-f
+.PP
+.B estd
+-v
+.SH DESCRIPTION
+This daemon dynamically sets the CPU-frequency on Enhanced SpeedStep,
+PowerNow, and APCI P-States-enabled CPUs depending on current cpu-utilization.
+You can use it to automatically keep CPU frequency and battery usage low when
+the system is mostly idle and speed it up when your workload demands it.
+Extensive configurability ensures you can also use it in non-standard
+situations, eg.  when you want to keep the CPU from running in lower speeds
+although the system is idle in order to ensure you have full processing power
+for interactive applications that use the CPU in small bursts.
+.PP
+A pidfile will be created in /var/run/estd.pid
+.SH OPTIONS
+.TP
+\-f
+Just print out the frequencies this CPU supports, then quit
+.TP
+\-v
+Just print the version of the binary, then quit
+.TP
+\-d
+Fork and become a daemon. You probably want to enable this (default off)
+.TP
+\-o
+Output CPU-frequencies as they are set. This only has effect when estd is
+not running in daemon-mode (when -d is not specified)
+.TP
+\-n
+Count time spent on nice processes as idle
+.TP
+\-A
+Force ACPI P-States Mode. Normally you don't have to force this
+as estd will auto-detect which CPU-scaling technology your machine supports.
+ACPI P-States are currently only supported on Dragonfly BSD.
+.TP
+\-C
+Use Intel On Demand Clock modulation, if present. This is only used
+as a means to further power savings while idle. In all instances the
+clock modulation feature will be turned off, except for when the lowest
+speed mode is chosen by estd, in which case the lowest clock duty cycle
+is used (this feature is not available on Dragonfly BSD)
+.TP
+\-E
+Force Enhanced Speedstep-Mode.
+.TP
+\-P
+Force PowerNow Mode.
+.TP
+\-a
+Select frequency-switching strategy: aggressive. Higher performance at the
+expense of battery-lifetime. All these frequency-switching strategies do not
+affect the range of frequencies estd will utilize, but merely how fast the
+daemon will switch to faster/slower CPU-operation
+.TP
+\-s
+Select frequency-switching strategy: smooth. This is a well balanced
+setting (default)
+.TP
+\-b
+Select frequency-switching strategy: battery. This tries to optimize for
+maximum battery lifetime
+.TP
+\-p interval
+Poll Interval between CPU-updates in microseconds. Lower values will adapt
+smoothly to your workload, but increase overhead. (default 500000 = 0.5s)
+.TP
+\-g period
+Grace Interval to wait before the clock frequency is scaled down.
+This option will stop estd from scaling down the clock frequency
+until the system cpu usage threshold has been below the low watermark
+percentage for x microseconds. (default 0 microseconds)
+.TP
+\-l low
+Low watermark percentage. If the average cpu-usage within each of the
+last (grace interval / poll interval) + 1 poll intervals has been
+below this value, estd will lower the cpu-speed according to the
+active frequency-switching strategy (default 40)
+.TP
+\-h high
+High watermark percentage. If the average cpu-usage within one poll interval
+is higher than this value, estd will raise the cpu-speed according to the
+frequency-switching strategy (default 80)
+.TP
+\-m minimum
+Minimum Mhz estd will ever set. If you didn't specify -O, this is a global
+lower boundary. If on the other hand you did enable Clock modulation, the
+lowest frequency will be determined by the value you gave here and the
+lowest Clock modulation setting your CPU can apply. If you supply a
+frequency your CPU doesn't support, it will be rounded to the next higher
+available frequency (default is the lowest frequency your cpu supports)
+.TP
+\-M maximum
+Maximum Mhz estd will ever set. This is a global upper boundary. Values your
+CPU doesn't support will be rounded to the next lower frequency supported
+(default is the highest frequency your cpu supports)
+.SH EXAMPLES
+.TP
+Run as a daemon, using sensible default settings suitable for most usage patterns
+.B estd
+\-d
+.PP
+.TP
+Maximize battery lifetime by limiting CPU frequency to 1000 MHz and switching to lower speeds fast
+.B estd
+\-d \-b \-M 1000
+.PP
+.TP
+Maximize performance by running at least at 1400 MHz and switching to higher speeds fast
+.B estd
+\-d \-a \-m 1400
+.PP
+.SH SIGNALS
+The frequency-switching strategy can be controlled at runtime via the signals SIGUSR1 and SIGUSR2.
+SIGUSR1 will switch to the previous switching strategy while SIGUSR2 will switch to the next
+strategy. Strategy order is currently Battery, Smooth, Aggressive. You can select a specific
+strategy statelessly by hitting one of the boundaries, see the README for details.
+.SH BUGS
+On NetBSD, this daemon requires an Enhanced SpeedStep enabled kernel (options ENHANCED_SPEEDSTEP),
+or a PowerNow enabled kernel which is available starting from NetBSD 3.0.
+The original (pre-Centrino) Speedstep is not supported.
+.SH EXIT STATUS
+estd returns zero if it succeeded in executing your request and non-zero otherwise.
+.SH AUTHOR
+Ove Soerensen
+Portions by Johannes Hofmann & Stephen M. Rumble
+.PP
+Current maintainer: Johannes Hofmann (Johannes.Hofmann@gmx.de)
+.PP
+http://www.ecademix.com/JohannesHofmann/estd.html
