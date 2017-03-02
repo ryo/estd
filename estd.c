@@ -648,7 +648,8 @@ main(int argc, char *argv[])
 	/* all ok, here we go */
 	if (daemonize) {
 		if (fork()) {
-			printf("estd: Forked\n");
+			if (verbose)
+				printf("estd: Forked\n");
 			exit(0);
 		}
 	} else {
