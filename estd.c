@@ -732,7 +732,9 @@ main(int argc, char *argv[])
 				}
 			}
 		}
-		usleep(poll);
+		if (poll >= 1000000)
+			sleep(poll / 1000000);
+		usleep(poll % 1000000);
 	}
 
 	return 0;
