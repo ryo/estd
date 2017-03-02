@@ -1,6 +1,8 @@
 OS!=uname -s
 .if ${OS} == "NetBSD"
- LIBS=-lutil
+ LIBS=-lutil -lprop
+ CFLAGS=-DOVERHEAT_HACK
+ EXTSRCS=netbsd_envstat_temp.c
 .endif
 .if ${OS} == "DragonFly"
  LIBS=-lutil -lkinfo
@@ -13,8 +15,8 @@ clean:
 	rm -f *.core
 	rm -f *~
 
-estd:	estd.c
-	gcc ${CFLAGS} ${LIBS} -o estd estd.c
+estd:	estd.c ${EXTSRCS}
+	gcc ${CFLAGS} ${LIBS} -o estd estd.c ${EXTSRCS}
 	
 all: estd
 

@@ -89,6 +89,13 @@ int             tech = TECH_UNKNOWN;
 int             use_clockmod = 0;
 int             clockmod_min = -1;
 int             clockmod_max = -1;
+#ifdef OVERHEAT_HACK
+extern int is_overheat(const char *, double, unsigned int);
+#define DEF_SENSORPOLL	15	/* check interval is 15 seconds */
+const char      *sensordev;
+unsigned int    sensorpoll = DEF_SENSORPOLL;
+double          sensorcelsius = 90.0;	/* default */
+#endif
 
 /* a domain is a set of CPUs for which the frequency must be set together */
 struct domain {
@@ -410,7 +417,11 @@ main(int argc, char *argv[])
 #endif
 
 	/* get command-line options */
+#ifdef OVERHEAT_HACK
+	while ((ch = getopt(argc, argv, "vfdonACEGILPT:t:asbp:h:l:g:m:M:c:")) != -1)
+#else
 	while ((ch = getopt(argc, argv, "vfdonACEGILPasbp:h:l:g:m:M:")) != -1)
+#endif
 		switch (ch) {
 		case 'v':
 			version();
@@ -483,6 +494,17 @@ main(int argc, char *argv[])
 		case 'M':
 			maxmhz = atoi(optarg);
 			break;
+#ifdef OVERHEAT_HACK
+		case 'T':
+			sensordev = optarg;
+			break;
+		case 't':
+			sensorpoll = atoi(optarg);
+			break;
+		case 'c':
+			sensorcelsius = atof(optarg);
+			break;
+#endif
 		default:
 			usage();
 			/* NOTREACHED */
@@ -664,6 +686,9 @@ main(int argc, char *argv[])
 
 	/* the big processing loop, we will only exit via signal */
 	while (1) {
+#ifdef OVERHEAT_HACK
+		int overheating = is_overheat(sensordev, sensorcelsius, sensorpoll);
+#endif
 		get_cputime();
 		for (d = 0; d < ndomains; d++) {
 			domain[d].curcpu = get_cpuusage(d);
@@ -672,6 +697,13 @@ main(int argc, char *argv[])
 			if (domain[d].curcpu != -1) {
 				/* strategy can change anytime (SIGUSR) */ 
 				curstrat = strategy;
+#ifdef OVERHEAT_HACK
+				if (overheating) {
+					if ((!daemonize) && (verbose))
+						printf("estd: overheat\n");
+					domain[d].curcpu = 0;	/* force down clock */
+				}
+#endif
 				if ((domain[d].curfreq > domain[d].minidx) && (domain[d].curcpu < low)) {
 					if (domain[d].lowtime < lowgrace)
 						domain[d].lowtime += poll;
