@@ -4,6 +4,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <regex.h>
 #include <prop/proplib.h>
 
 #ifndef PATH_ENVSTAT
@@ -119,7 +120,7 @@ freadin(FILE *fh)
 }
 
 struct keychecker {
-	char key[128];
+	regex_t re;
 	double limit;
 	int result;
 };
@@ -128,11 +129,15 @@ static void
 prop_check_callback(void *arg, const char *key, prop_object_t obj)
 {
 	struct keychecker *keychecker;
+	regmatch_t re_pmatch[1];
 	double celsius;
 	uint64_t num;
 
 	keychecker = (struct keychecker *)arg;
-	if (strcmp(keychecker->key, key) != 0)
+
+	re_pmatch[0].rm_so = 0;
+	re_pmatch[0].rm_eo = strlen(key);
+	if (regexec(&keychecker->re, key, 1, re_pmatch, REG_STARTEND) != 0)
 		return;
 
 	switch (prop_object_type(obj)) {
@@ -175,9 +180,11 @@ prop_check_callback(void *arg, const char *key, prop_object_t obj)
 static int
 check_overheat(const char *device, double limit)
 {
-	struct keychecker keychecker;
 	prop_object_t propobj;
+	struct keychecker keychecker;
 	FILE *fh;
+	int rc;
+	char pattern[128];
 	char *xml;
 
 	/* exec "envstat -x" and parse */
@@ -200,11 +207,15 @@ check_overheat(const char *device, double limit)
 	}
 
 	memset(&keychecker, 0, sizeof(keychecker));
-	snprintf(keychecker.key, sizeof(keychecker.key), "%s.cur-value", device);
+	snprintf(pattern, sizeof(pattern), "%s\\.cur-value", device);
+
+	rc = regcomp(&keychecker.re, pattern, REG_EXTENDED|REG_ICASE);
 	keychecker.limit = limit;
 
 	prop_iterate(prop_check_callback, (void *)&keychecker, propobj);
 	prop_object_release(propobj);
+
+	regfree(&keychecker.re);
 
 	return keychecker.result;
 }
@@ -234,7 +245,7 @@ main(int argc, char *argv[])
 	int fire;
 
 	for (;;) {
-		fire = check_overheat("coretemp0", 59.0);
+		fire = check_overheat("coretemp[0-9]+", 59.0);
 		printf("overheat=%d\n", fire);
 		fflush(stdout);
 
