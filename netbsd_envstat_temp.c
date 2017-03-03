@@ -152,8 +152,6 @@ prop_check_callback(void *arg, const char *key, prop_object_t obj)
 		celsius = num / 1000000;
 		if (celsius >= keychecker->limit)
 			keychecker->result = 1;
-		else
-			keychecker->result = 0;
 		break;
 	case PROP_TYPE_STRING:
 #ifdef NETBSD_ENVSTAT_DEBUG
