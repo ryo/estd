@@ -1,14 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <string.h>
 #include <errno.h>
 #include <time.h>
 #include <regex.h>
+#include <paths.h>
 #include <prop/proplib.h>
+#include <sys/envsys.h>
 
 #ifndef PATH_ENVSTAT
 #define PATH_ENVSTAT "/usr/sbin/envstat"
+#endif
+#ifndef _PATH_SYSMON
+#define _PATH_SYSMON "/dev/sysmon"
 #endif
 
 static void
@@ -181,24 +187,45 @@ check_overheat(const char *device, double limit)
 	prop_object_t propobj;
 	struct keychecker keychecker;
 	FILE *fh;
-	int rc;
+	int fd, rc, use_envstat = 0;
 	char pattern[128];
 	char *xml;
 
-	/* exec "envstat -x" and parse */
-	fh = popen(PATH_ENVSTAT " -x", "r");
-	if (fh == NULL) {
-		fprintf(stderr, "popen: envstat: %s\n", strerror(errno));
-		return -1;
+	/*
+	 * if device is "envstat:coretemp0",
+	 * exec "/usr/sbin/envstat -x" and read from it.
+	 * otherwise, read from /dev/sysmon directly.
+	 */
+	if (strncmp(device, "envstat:", 8) == 0) {
+		use_envstat = 1;
+		device += 8;
 	}
-	xml = freadin(fh);
-	pclose(fh);
 
-	if (xml == NULL)
-		return -1;
+	if (use_envstat) {
+		/* exec "envstat -x" and parse */
+		fh = popen(PATH_ENVSTAT " -x", "r");
+		if (fh == NULL) {
+			fprintf(stderr, "popen: envstat: %s\n", strerror(errno));
+			return -1;
+		}
+		xml = freadin(fh);
+		pclose(fh);
+		if (xml == NULL)
+			return -1;
+		propobj = prop_dictionary_internalize(xml);
+		free(xml);
+	} else {
+		fd = open(_PATH_SYSMON, O_RDONLY);
+		rc = prop_dictionary_recv_ioctl(fd,
+		    ENVSYS_GETDICTIONARY, &propobj);
+		close(fd);
+		if (rc) {
+			fprintf(stderr, "estd: cannot read %s: %s\n",
+			    _PATH_SYSMON, strerror(errno));
+			return -1;
+		}
+	}
 
-	propobj = prop_dictionary_internalize(xml);
-	free(xml);
 	if (propobj == NULL) {
 		fprintf(stderr, "estd: cannot read result of `envstat -x`\n");
 		return -1;
@@ -243,7 +270,7 @@ main(int argc, char *argv[])
 	int fire;
 
 	for (;;) {
-		fire = check_overheat("coretemp[0-9]+", 59.0);
+		fire = check_overheat("coretemp[0-9]+", 50.0);
 		printf("overheat=%d\n", fire);
 		fflush(stdout);
 
