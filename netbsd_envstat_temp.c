@@ -217,7 +217,7 @@ check_overheat(const char *device, double limit)
 	} else {
 		fd = open(_PATH_SYSMON, O_RDONLY);
 		rc = prop_dictionary_recv_ioctl(fd,
-		    ENVSYS_GETDICTIONARY, &propobj);
+		    ENVSYS_GETDICTIONARY, (prop_dictionary_t *)&propobj);
 		close(fd);
 		if (rc) {
 			fprintf(stderr, "estd: cannot read %s: %s\n",
