@@ -10,8 +10,8 @@
 #include <prop/proplib.h>
 #include <sys/envsys.h>
 
-#ifndef PATH_ENVSTAT
-#define PATH_ENVSTAT "/usr/sbin/envstat"
+#ifndef CMD_ENVSTAT
+#define CMD_ENVSTAT "/usr/sbin/envstat -c /etc/envsys.conf"
 #endif
 #ifndef _PATH_SYSMON
 #define _PATH_SYSMON "/dev/sysmon"
@@ -192,18 +192,26 @@ check_overheat(const char *device, double limit)
 	char *xml;
 
 	/*
-	 * if device is "envstat:coretemp0",
-	 * exec "/usr/sbin/envstat -x" and read from it.
+	 * <device> is able to specified as regexp.
+	 *
+	 * if <device> has prefix "envstat:",
+	 * exec "/usr/sbin/envstat -c /etc/envstat.conf -x" and read from it.
 	 * otherwise, read from /dev/sysmon directly.
+	 *
+	 * e.g.
+	 *    "envstat:MyTempSensor0" - exec "envstat -c /etc/envstat.conf -x" and read from it
+	 *    "envstat:coretemp0"     - ditto
+	 *    "coretemp0"             - read coretemp0 from /dev/sysmon
+	 *    "coretemp[0-9]+"        - read coretemp0,1,2,... from /dev/sysmon
 	 */
 	if (strncmp(device, "envstat:", 8) == 0) {
 		use_envstat = 1;
-		device += 8;
+		device += sizeof("envstat:") - 1;
 	}
 
 	if (use_envstat) {
 		/* exec "envstat -x" and parse */
-		fh = popen(PATH_ENVSTAT " -x", "r");
+		fh = popen(CMD_ENVSTAT " -x", "r");
 		if (fh == NULL) {
 			fprintf(stderr, "popen: envstat: %s\n", strerror(errno));
 			return -1;
