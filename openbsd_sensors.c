@@ -17,7 +17,7 @@
 #define SYSCTL_BUFSIZ 8192
 
 static int
-check_overheat(const char *device, double limit)
+check_overheat(const char *device, double limit, double *degrees_ret)
 {
 	regex_t re;
 	regmatch_t re_pmatch[1];
@@ -32,6 +32,9 @@ check_overheat(const char *device, double limit)
 	char pattern[128];
 
 	rc = regcomp(&re, device, REG_EXTENDED|REG_ICASE);
+
+	if (degrees_ret != NULL)
+		*degrees_ret = 0;
 
 	for (dev = 0;; dev++) {
 		mib[2] = dev;
@@ -63,13 +66,17 @@ check_overheat(const char *device, double limit)
 
 			value = (sensor.value - 273150000) / 1000000.0;
 
+			if ((degrees_ret != NULL) && (value > *degrees_ret))
+				*degrees_ret = value;
+
 #ifdef TEST
 			printf("check: %s=%.2f > %.2f\n", sysctlname, value, limit);
 #endif
 
 			if (value >= limit) {
 				overheated = 1;
-				goto done;
+				if (degrees_ret == NULL)
+					goto done;
 			}
 		}
 	}
@@ -80,7 +87,7 @@ check_overheat(const char *device, double limit)
 }
 
 int
-is_overheat(const char *device, double degrees, unsigned int cachetime)
+is_overheat(const char *device, double degrees, unsigned int cachetime, double *degrees_ret)
 {
 	static struct timespec ts_last, ts_now;
 	static int result;
@@ -90,7 +97,7 @@ is_overheat(const char *device, double degrees, unsigned int cachetime)
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_now);
 	if ((ts_now.tv_sec - ts_last.tv_sec) > cachetime) {
-		result = check_overheat(device, degrees);
+		result = check_overheat(device, degrees, degrees_ret);
 		ts_last = ts_now;
 	}
 

@@ -128,6 +128,7 @@ freadin(FILE *fh)
 struct keychecker {
 	regex_t re;
 	double limit;
+	double max;
 	int result;
 };
 
@@ -158,6 +159,8 @@ prop_check_callback(void *arg, const char *key, prop_object_t obj)
 		degrees = num / 1000000;
 		if (degrees >= keychecker->limit)
 			keychecker->result = 1;
+		if (keychecker->max < degrees)
+			keychecker->max = degrees;
 		break;
 	case PROP_TYPE_STRING:
 #ifdef TEST
@@ -182,7 +185,7 @@ prop_check_callback(void *arg, const char *key, prop_object_t obj)
 }
 
 static int
-check_overheat(const char *device, double limit)
+check_overheat(const char *device, double limit, double *degrees_ret)
 {
 	prop_object_t propobj;
 	struct keychecker keychecker;
@@ -244,17 +247,21 @@ check_overheat(const char *device, double limit)
 
 	rc = regcomp(&keychecker.re, pattern, REG_EXTENDED|REG_ICASE);
 	keychecker.limit = limit;
+	keychecker.max = 0;
 
 	prop_iterate(prop_check_callback, (void *)&keychecker, propobj);
 	prop_object_release(propobj);
 
 	regfree(&keychecker.re);
 
+	if (degrees_ret != NULL)
+		*degrees_ret = keychecker.max;
+
 	return keychecker.result;
 }
 
 int
-is_overheat(const char *device, double degrees, unsigned int cachetime)
+is_overheat(const char *device, double degrees, unsigned int cachetime, double *degrees_ret)
 {
 	static struct timespec ts_last, ts_now;
 	static int result;
@@ -264,7 +271,7 @@ is_overheat(const char *device, double degrees, unsigned int cachetime)
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_now);
 	if ((ts_now.tv_sec - ts_last.tv_sec) > cachetime) {
-		result = check_overheat(device, degrees);
+		result = check_overheat(device, degrees, degrees_ret);
 		ts_last = ts_now;
 	}
 

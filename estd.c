@@ -94,11 +94,12 @@ int             use_clockmod = 0;
 int             clockmod_min = -1;
 int             clockmod_max = -1;
 #ifdef OVERHEAT_HACK
-extern int is_overheat(const char *, double, unsigned int);
+extern int is_overheat(const char *, double, unsigned int, double *);
 #define DEF_SENSORPOLL	15	/* check interval is 15 seconds */
 const char      *sensordev;
 unsigned int    sensorpoll = DEF_SENSORPOLL;
 double          sensorcrit = 90.0;	/* defaut: 90 degC */
+double          sensorcur;
 #endif
 
 /* a domain is a set of CPUs for which the frequency must be set together */
@@ -463,6 +464,8 @@ main(int argc, char *argv[])
 #if defined(__DragonFly__)
 	struct pidfh *pdf;
 #endif
+	char procbuf[1024];
+	size_t proclen;
 
 	/* get command-line options */
 #ifdef OVERHEAT_HACK
@@ -788,9 +791,12 @@ main(int argc, char *argv[])
 	/* the big processing loop, we will only exit via signal */
 	while (1) {
 #ifdef OVERHEAT_HACK
-		int overheating = is_overheat(sensordev, sensorcrit, sensorpoll);
+		int overheating = is_overheat(sensordev, sensorcrit, sensorpoll, &sensorcur);
 #endif
 		get_cputime();
+
+		proclen = 0;
+		procbuf[0] = '\0';
 		for (d = 0; d < ndomains; d++) {
 			domain[d].curcpu = get_cpuusage(d);
 			if ((!daemonize) && (verbose))
@@ -802,10 +808,9 @@ main(int argc, char *argv[])
 				if (overheating) {
 					if ((!daemonize) && (verbose))
 						printf("estd: overheat\n");
-					domain[d].curcpu = 0;	/* force down clock */
 				}
 #endif
-				if ((domain[d].curfreq > domain[d].minidx) && (domain[d].curcpu < low)) {
+				if ((domain[d].curfreq > domain[d].minidx) && (overheating || (domain[d].curcpu < low))) {
 					if (domain[d].lowtime < lowgrace)
 						domain[d].lowtime += poll;
 
@@ -831,8 +836,24 @@ main(int argc, char *argv[])
 							set_clockmod(clockmod_max);
 					}
 				}
+
+				proclen += snprintf(procbuf + proclen, sizeof(procbuf) - 1 - proclen,
+				    "%s%d%%%%,%dMHz",
+				    (d == 0) ? "" : ",",
+				    domain[d].curcpu, 
+					domain[d].freqtab[domain[d].curfreq]);
 			}
 		}
+
+
+#ifdef OVERHEAT_HACK
+		proclen += snprintf(procbuf + proclen, sizeof(procbuf) - 1 - proclen, ", %.1fdegC%s",
+		    sensorcur, overheating ? " (Overheated)" : "");
+#endif
+		setproctitle(procbuf);
+
+
+
 		if (poll >= 1000000)
 			sleep(poll / 1000000);
 		usleep(poll % 1000000);
