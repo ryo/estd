@@ -136,7 +136,7 @@ prop_check_callback(void *arg, const char *key, prop_object_t obj)
 {
 	struct keychecker *keychecker;
 	regmatch_t re_pmatch[1];
-	double celsius;
+	double degrees;
 	uint64_t num;
 
 	keychecker = (struct keychecker *)arg;
@@ -148,19 +148,19 @@ prop_check_callback(void *arg, const char *key, prop_object_t obj)
 
 	switch (prop_object_type(obj)) {
 	case PROP_TYPE_BOOL:
-#ifdef NETBSD_ENVSTAT_DEBUG
+#ifdef TEST
 		fprintf(stderr, "%s=%s\n", key, prop_bool_true(obj) ? "true" : "false");
 #endif
 		break;
 	case PROP_TYPE_NUMBER:
 		num = prop_number_unsigned_integer_value(obj);
 		num -= 273150000;
-		celsius = num / 1000000;
-		if (celsius >= keychecker->limit)
+		degrees = num / 1000000;
+		if (degrees >= keychecker->limit)
 			keychecker->result = 1;
 		break;
 	case PROP_TYPE_STRING:
-#ifdef NETBSD_ENVSTAT_DEBUG
+#ifdef TEST
 		{
 			const char *p;
 			p = prop_string_cstring_nocopy(obj);
@@ -169,12 +169,12 @@ prop_check_callback(void *arg, const char *key, prop_object_t obj)
 #endif
 		break;
 	case PROP_TYPE_DATA:
-#ifdef NETBSD_ENVSTAT_DEBUG
+#ifdef TEST
 		fprintf(stderr, "%s=<PROP_TYPE_DATA>\n", key);
 #endif
 		break;
 	default:
-#ifdef NETBSD_ENVSTAT_DEBUG
+#ifdef TEST
 		fprintf(stderr, "%s: UNKNOWN PROP TYPE\n", key);
 #endif
 		break;
@@ -254,7 +254,7 @@ check_overheat(const char *device, double limit)
 }
 
 int
-is_overheat(const char *device, double celsius, unsigned int cachetime)
+is_overheat(const char *device, double degrees, unsigned int cachetime)
 {
 	static struct timespec ts_last, ts_now;
 	static int result;
@@ -264,23 +264,26 @@ is_overheat(const char *device, double celsius, unsigned int cachetime)
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_now);
 	if ((ts_now.tv_sec - ts_last.tv_sec) > cachetime) {
-		result = check_overheat(device, celsius);
+		result = check_overheat(device, degrees);
 		ts_last = ts_now;
 	}
 
 	return result;
 }
 
-#if 0
+#ifdef TEST
 int
 main(int argc, char *argv[])
 {
 	int fire;
 
 	for (;;) {
-		fire = check_overheat("coretemp[0-9]+", 50.0);
-		printf("overheat=%d\n", fire);
+		fire = check_overheat("envstat:coretemp[0-9]+", 59.0);
+		printf("overheat with envstat=%d\n", fire);
 		fflush(stdout);
+
+		fire = check_overheat("coretemp[0-9]+", 59.0);
+		printf("overheat with sysmon=%d\n", fire);
 
 		sleep(1);
 	}
