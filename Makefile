@@ -1,9 +1,17 @@
 OS!=uname -s
+
 .if ${OS} == "NetBSD"
  LIBS=-lutil -lprop
  CFLAGS=-DOVERHEAT_HACK
  EXTSRCS=netbsd_envstat_temp.c
 .endif
+
+.if ${OS} == "OpenBSD"
+ LIBS=-lutil
+ CFLAGS=-DOVERHEAT_HACK
+ EXTSRCS=openbsd_sensors.c
+.endif
+
 .if ${OS} == "DragonFly"
  LIBS=-lutil -lkinfo
 .endif

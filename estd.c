@@ -43,7 +43,7 @@
 #include <errno.h>
 #include <signal.h>
 
-#define ESTD_VERSION "Release 11"
+#define ESTD_VERSION "Release 11+0"
 #define BATTERY 0
 #define SMOOTH 1
 #define AGGRESSIVE 2
@@ -51,15 +51,19 @@
 #define MIN_POLL 10000
 #define DEF_HIGH 80
 #define DEF_LOW 40
-#define TECH_UNKNOWN 0
-#define TECH_EST 1
-#define TECH_POWERNOW 2
-#define TECH_ACPI 3
-#define TECH_INTREPID 4
-#define TECH_LOONGSON 5
-#define TECH_ROCKCHIP 6
-#define TECH_GENERIC 7
-#define TECH_MAX 7
+
+enum {
+	TECH_UNKNOWN = 0,
+	TECH_EST,
+	TECH_POWERNOW,
+	TECH_ACPI,
+	TECH_INTREPID,
+	TECH_LOONGSON,
+	TECH_ROCKCHIP,
+	TECH_OPENBSD,
+	TECH_GENERIC,
+	TECH_MAX
+};
  
 /* this is ugly, but... <shrug> */
 #define MAX_FREQS 32
@@ -94,7 +98,7 @@ extern int is_overheat(const char *, double, unsigned int);
 #define DEF_SENSORPOLL	15	/* check interval is 15 seconds */
 const char      *sensordev;
 unsigned int    sensorpoll = DEF_SENSORPOLL;
-double          sensorcelsius = 90.0;	/* default */
+double          sensorcrit = 90.0;	/* defaut: 90 degC */
 #endif
 
 /* a domain is a set of CPUs for which the frequency must be set together */
@@ -105,6 +109,7 @@ struct domain {
 	char        *setctl;
 	useconds_t   lowtime;
 	int          freqtab[MAX_FREQS];
+	int          freqtab2perf[MAX_FREQS];
 	int          nfreqs;
 	int          minidx;
 	int          maxidx;
@@ -121,7 +126,11 @@ int             ndomains;
  static struct kinfo_cputime *cp_old;
  size_t cp_time_len;
 #else
+# if defined(__OpenBSD__)
+ static int cpumib[3] = {CTL_KERN, KERN_CPTIME2, 0};
+# else
  static int cpumib[2] = {CTL_KERN, KERN_CP_TIME};
+# endif
  static u_int64_t cp_time[MAX_CPUS][CPUSTATES];
  static u_int64_t cp_old[MAX_CPUS][CPUSTATES];
  static u_int64_t cp_diff[MAX_CPUS][CPUSTATES];
@@ -135,6 +144,7 @@ static char	*techdesc[TECH_MAX + 1] = {"Unknown",
 				"Intrepid",
 				"Loongson",
 				"Rockchip",
+				"OpenBSD"
 				"Generic"
 				};
 static char	*freqctl[TECH_MAX + 1] = {	"",	
@@ -144,15 +154,17 @@ static char	*freqctl[TECH_MAX + 1] = {	"",
 				"machdep.intrepid.frequency.available",
 				"machdep.loongson.frequency.available",
 				"machdep.cpu.frequency.available",
+				"",
 				"machdep.frequency.available"
 				};
-static char	*setctl[TECH_MAX + 1] = {	"",
+static char	*setctl[TECH_MAX + 1] = {"",	
 				"machdep.est.frequency.target",
 				"machdep.powernow.frequency.target",
 				"hw.acpi.cpu.px_dom0.select",
 				"machdep.intrepid.frequency.target",
 				"machdep.loongson.frequency.target",
 				"machdep.cpu.frequency.target",
+				"hw.setperf",
 				"machdep.frequency.current"
 				};
 
@@ -186,6 +198,7 @@ ecalloc(size_t number, size_t size) {
 	return ret;
 }
 
+#if defined(__DragonFly__) || defined(__NetBSD__)
 int
 acpi_init_domain(int d)
 {
@@ -239,6 +252,7 @@ acpi_init()
 
 	return d > 0 ? 0 : 1;
 }
+#endif /* defined(__DragonFly__) || defined(__NetBSD__) */
 
 
 /* returns cpu-usage in percent, mean over the sleep-interval or -1 if an error occured */
@@ -295,6 +309,20 @@ get_cpuusage(int d)
 int
 get_cputime(void)
 {
+#ifdef __OpenBSD__
+	size_t cp_time_size = sizeof(cp_time[0]);
+	int cpu;
+
+	memcpy(cp_old, cp_time, cp_time_max_size);
+
+	for (cpu = 0; cpu < ncpus; cpu++) {
+		cpumib[2] = cpu;
+		if (sysctl(cpumib, 3, &cp_time[cpu], &cp_time_size, NULL, 0) < 0) {
+			fprintf(stderr, "estd: Cannot get CPU status\n");
+			exit(1);
+		}
+	}
+#else
 	size_t cp_time_size = cp_time_max_size;
 
 	memcpy(cp_old, cp_time, cp_time_max_size);
@@ -304,7 +332,7 @@ get_cputime(void)
 	}
 
 	ncpus = cp_time_size / sizeof cp_time[0];
-
+#endif
 	return 0;
 }
 
@@ -345,6 +373,19 @@ get_cpuusage(int d)
 void
 set_freq(int d)
 {
+#ifdef __OpenBSD__
+	int hw_setperf_mib[] = { CTL_HW, HW_SETPERF };
+	int freq = domain[d].freqtab[domain[d].curfreq];
+	int perf = domain[d].freqtab2perf[domain[d].curfreq];
+
+	if ((!daemonize) && (verbose))
+		printf("%i MHz\n", freq);
+
+	if (sysctl(hw_setperf_mib, 2, NULL, NULL, &perf, sizeof(perf)) < 0) {
+		fprintf(stderr, "estd: Cannot set CPU frequency (maybe you aren't root?)\n");
+		exit(1);
+	}
+#else
 	int freq = domain[d].freqtab[domain[d].curfreq];
 
 	if ((!daemonize) && (verbose))
@@ -353,12 +394,13 @@ set_freq(int d)
 		fprintf(stderr, "estd: Cannot set CPU frequency (maybe you aren't root?)\n");
 		exit(1);
 	}
+#endif
 }
 
 void
 set_clockmod(int level)
 {
-#if !defined(__DragonFly__)
+#ifdef __NetBSD__
 	if (!use_clockmod || level == -1)
 		return;
 
@@ -384,6 +426,12 @@ void
 sighandler(int sig)
 {
 	set_clockmod(clockmod_max);
+#ifdef __OpenBSD__
+	{
+		int hw_perfpolicy[] = {CTL_HW, HW_PERFPOLICY};
+		sysctl(hw_perfpolicy, 2, NULL, NULL, "auto", sizeof("auto") - 1);
+	}
+#endif
 	exit(0);
 }
 
@@ -413,7 +461,7 @@ main(int argc, char *argv[])
 	int             d;
 	FILE           *fexists;
 #if defined(__DragonFly__)
-	struct pidfh   *pdf;
+	struct pidfh *pdf;
 #endif
 
 	/* get command-line options */
@@ -502,7 +550,7 @@ main(int argc, char *argv[])
 			sensorpoll = atoi(optarg);
 			break;
 		case 'c':
-			sensorcelsius = atof(optarg);
+			sensorcrit = atof(optarg);
 			break;
 #endif
 		default:
@@ -513,8 +561,7 @@ main(int argc, char *argv[])
 	ndomains = 1;
 	domain = ecalloc(ndomains, sizeof(struct domain));
 
-#if defined(__NetBSD__) || defined(__DragonFly__)
-# if defined(__DragonFly__)
+#if defined(__DragonFly__)
 	if (kinfo_get_cpus(&ncpus)) {
 		fprintf(stderr, "estd: Cannot get number of cpus\n");
 		exit(1);
@@ -522,19 +569,24 @@ main(int argc, char *argv[])
 	cp_time = ecalloc(ncpus, sizeof(struct kinfo_cputime));
 	cp_old  = ecalloc(ncpus, sizeof(struct kinfo_cputime));
 	cp_time_len = ncpus * sizeof(struct kinfo_cputime);
-# elif defined(__NetBSD__)
-	size_t ncpus_len = sizeof(ncpus);
-	if (sysctlbyname("hw.ncpu", &ncpus, &ncpus_len, NULL, 0) != 0) {
-		fprintf(stderr, "estd: Cannot get number of cpus\n");
-		exit(1);
+#elif defined(__NetBSD__) || defined(__OpenBSD__)
+	{
+		size_t ncpus_len = sizeof(ncpus);
+		int ncpumib[] = {CTL_HW, HW_NCPU};
+		if (sysctl(ncpumib, 2, &ncpus, &ncpus_len, NULL, 0) < 0) {
+			fprintf(stderr, "estd: Cannot get number of cpus\n");
+			exit(1);
+		}
 	}
-# endif
+#endif
 	domain[0].ncpus = ncpus;
 	domain[0].cpus = ecalloc(ncpus, sizeof(int));
 	for (i = 0; i < domain[0].ncpus; i++)
 		domain[0].cpus[i] = i;
-#endif
 
+#ifdef __OpenBSD__
+	tech = TECH_OPENBSD;
+#else
 	/* try to guess cpu-scaling technology */
 	if (tech == TECH_UNKNOWN) {
 		for (tech = 1; tech <= TECH_MAX; tech++) {
@@ -555,7 +607,7 @@ main(int argc, char *argv[])
 		domain[0].freqctl = freqctl[tech];
 		domain[0].setctl = setctl[tech];
 	}
-
+#endif
 	if ((high <= low) || (low < 0) || (low > 100) || (high < 0) || (high > 100)) {
 		fprintf(stderr, "estd: Invalid high/low watermark combination\n");
 		exit(1);
@@ -571,6 +623,53 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
+#ifdef __OpenBSD__
+	{
+		int hw_perfpolicy[] = {CTL_HW, HW_PERFPOLICY};
+		int hw_setperf[] = {CTL_HW, HW_SETPERF};
+		int hw_cpuspeed[] = {CTL_HW, HW_CPUSPEED};
+		int idx, val;
+		int cpuclock;
+		size_t val_size = sizeof(val);
+
+		if (sysctl(hw_perfpolicy, 2, NULL, NULL,
+		    "manual", sizeof("manual") - 1) < 0) {
+			fprintf(stderr, "estd: sysctl: hw.perfpolicy: %s",
+			    strerror(errno));
+			exit(1);
+		}
+
+		idx = 0;
+		cpuclock = -1;
+		for (i = 0; i <= 100; i += 2) {
+			val = i;
+			if (sysctl(hw_setperf, 2, NULL, NULL,
+			    &val, sizeof(val)) < 0) {
+				fprintf(stderr, "estd: sysctl: hw.setperf: %s",
+				    strerror(errno));
+				exit(1);
+			}
+
+			if (sysctl(hw_cpuspeed, 2, &val, &val_size,
+			    NULL, 0) < 0) {
+				fprintf(stderr, "estd: sysctl: hw.cpuspeed: %s",
+				    strerror(errno));
+				exit(1);
+			}
+
+			if (cpuclock != val) {
+				cpuclock = val;
+				domain[0].freqtab[idx] = cpuclock;
+				domain[0].freqtab2perf[idx] = i;
+				if (++idx >= MAX_FREQS)
+					break;
+			}
+		}
+		domain[0].minidx = 0;
+		domain[0].maxidx = idx - 1;
+		domain[0].nfreqs = idx;
+	}
+#else
 	/* for each cpu domain... */
 	for (d = 0; d < ndomains; d++) {
 		/* get supported frequencies... */
@@ -617,8 +716,9 @@ main(int argc, char *argv[])
 		}
 		exit(0);
 	}
+#endif
 
-	#if !defined(__DragonFly__)
+#ifdef __NetBSD__
 	{
 		char   *lastfp = NULL;
 		char	clockmods[SYSCTLBUF];
@@ -637,7 +737,7 @@ main(int argc, char *argv[])
 			}
 		}
 	}
-	#endif
+#endif
 
 	if ((fexists = fopen("/var/run/estd.pid", "r")) != NULL) {
 		fprintf(stderr, "estd: Pidfile /var/run/estd.pid exists, remove it if you are sure it shouldn't be there (maybe another instance of estd is already running?)\n");
@@ -688,7 +788,7 @@ main(int argc, char *argv[])
 	/* the big processing loop, we will only exit via signal */
 	while (1) {
 #ifdef OVERHEAT_HACK
-		int overheating = is_overheat(sensordev, sensorcelsius, sensorpoll);
+		int overheating = is_overheat(sensordev, sensorcrit, sensorpoll);
 #endif
 		get_cputime();
 		for (d = 0; d < ndomains; d++) {
