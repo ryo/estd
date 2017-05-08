@@ -826,7 +826,7 @@ main(int argc, char *argv[])
 				} else {
 					domain[d].lowtime = 0;
 
-					if ((domain[d].curfreq < domain[d].maxidx) && (domain[d].curcpu > high)) {
+					if ((domain[d].curfreq < domain[d].maxidx) && (!overheating && (domain[d].curcpu > high))) {
 						if (curstrat == AGGRESSIVE)
 							domain[d].curfreq = domain[d].maxidx;
 						else
